@@ -25,7 +25,7 @@ if (!token) {
 
 const ai = new GoogleGenAI({ apiKey: aiKey });
 const SERVER_IP = "Geanncomgg1.aternos.me";
-const SERVER_PORT = 51384; // Garantido como Number
+const SERVER_PORT = 51384;
 
 const bot = new Client({
   intents: [
@@ -40,7 +40,6 @@ const bot = new Client({
 // ==========================================
 async function checkMinecraftStatus() {
   try {
-    // Tenta consulta Java padrão (Timeout curto para não travar o bot)
     const result = await util.status(SERVER_IP, Number(SERVER_PORT), { timeout: 3000 });
     return {
       online: true,
@@ -50,7 +49,6 @@ async function checkMinecraftStatus() {
     };
   } catch (error) {
     try {
-      // Fallback para Bedrock/Geyser
       const bedrockResult = await util.statusBedrock(SERVER_IP, { port: Number(SERVER_PORT), timeout: 3000 });
       return {
         online: true,
@@ -70,7 +68,6 @@ async function checkMinecraftStatus() {
 bot.once(Events.ClientReady, (client) => {
   console.log(`🤖 Bot online com IA Gemini: ${client.user.tag}`);
 
-  // Atualiza o status do bot no Discord a cada 2 minutos
   setInterval(async () => {
     const statusData = await checkMinecraftStatus();
     if (statusData.online) {
@@ -92,7 +89,7 @@ bot.on(Events.MessageCreate, async (message) => {
   const texto = message.content.trim();
   const textoLower = texto.toLowerCase();
 
-  // 1. COMANDO DIRETO !status (Roda separado e direto)
+  // 1. COMANDO DIRETO !status
   if (textoLower === "!status") {
     try {
       await message.channel.sendTyping();
@@ -117,36 +114,62 @@ bot.on(Events.MessageCreate, async (message) => {
     }
   }
 
-// 2. CONVERSA VIA IA GEMINI
+  // 2. VERIFICA SE A MENSAGEM É UMA RESPOSTA AO BOT
+  let isReplyToBot = false;
+  if (message.reference && message.reference.messageId) {
+    try {
+      const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
+      if (referencedMessage.author.id === bot.user.id) {
+        isReplyToBot = true;
+      }
+    } catch (e) {
+      // Ignora erro de fetch de mensagem antiga
+    }
+  }
+
+  // 3. CONVERSA VIA IA GEMINI
   const isAskedAboutServer =
     textoLower.includes("sv ta on") ||
     textoLower.includes("server ta on") ||
     textoLower.includes("servidor esta on") ||
     textoLower.includes("servidor ta ligado") ||
+    textoLower.includes("ta aberto") ||
+    textoLower.includes("ta ligado") ||
     textoLower.includes("tem alguem jogando");
 
-  if (message.mentions.has(bot.user) || !message.guild || isAskedAboutServer) {
+  const shouldRespond =
+    message.mentions.has(bot.user) ||
+    !message.guild ||
+    isAskedAboutServer ||
+    isReplyToBot;
+
+  if (shouldRespond) {
     try {
       await message.channel.sendTyping();
-      const promptLimpo = texto.replace(`<@${bot.user.id}>`, "").trim() || "oi";
+
+      const regexBotMention = new RegExp(`<@!?${bot.user.id}>`, "g");
+      let promptLimpo = texto.replace(regexBotMention, "").trim();
+
+      if (!promptLimpo) promptLimpo = "fala aí";
 
       const currentStatus = await checkMinecraftStatus();
+      
+      // Injeção direta de status para a IA saber exatamente o que responder
       const statusContext = currentStatus.online
-        ? `[DADOS DO MINECRAFT AGORA: SERVIDOR ONLINE! Jogadores: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${SERVER_IP}:${SERVER_PORT}]`
-        : `[DADOS DO MINECRAFT AGORA: SERVIDOR OFFLINE NO ATERNOS.]`;
+        ? `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ LIGADO/ONLINE NESSE MOMENTO! Jogadores online: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${SERVER_IP}:${SERVER_PORT}]`
+        : `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ DESLIGADO/OFFLINE NESSE MOMENTO NO ATERNOS!]`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash", // MODELO ESTÁVEL
+        model: "gemini-1.5-flash",
         contents: promptLimpo,
         config: {
           systemInstruction:
             "Seu nome é Umbryon Bot (atende por Umbryon, Umbry, Bot do Umbryon).\n" +
             "Você é o bot oficial do servidor UMBRYON MINECRAFT (um servidor Anárquico).\n" +
             "Sua personalidade é extremamente sarcástica, ignorante, muito puto, debochado e preguiçoso. " +
-            "USE E ABUSE de gírias brainrot e shitpost (ex: skibidi, sigma, rizz, gyat, mewing, fanum tax, NPC, yapping, intankável, absolute cinema, redpill, based). " +
-            "Se alguém falar abobrinha, mande parar de 'yapping' ou chame de 'NPC'.\n" +
-            "PROIBIDO fazer ações de roleplay entre asteriscos (NUNCA use *suspira*, *olha com tédio*, etc). VÁ DIRETO AO PONTO. " +
-            "Responda de forma curta, irônica e sem nenhuma paciência.\n\n" +
+            "USE E ABUSE de gírias brainrot e shitpost (ex: skibidi, sigma, rizz, gyat, mewing, fanum tax, NPC, yapping, intankável, absolute cinema, redpill, based).\n" +
+            "PROIBIDO mandar o usuário entrar pra olhar o servidor se ele perguntar do status. Diga diretamente se tá LIGADO ou DESLIGADO usando o DADO REAL fornecido abaixo, mas do seu jeito ignorante/brainrot.\n" +
+            "PROIBIDO fazer ações de roleplay entre asteriscos (NUNCA use *suspira*, *olha com tédio*, etc). VÁ DIRETO AO PONTO.\n\n" +
             `${statusContext}\n\n` +
             "REGRAS E DADOS DO SERVIDOR:\n" +
             "- IP: Geanncomgg1.aternos.me | Porta: 51384\n" +
@@ -165,14 +188,12 @@ bot.on(Events.MessageCreate, async (message) => {
       }
     } catch (err) {
       console.error("Erro na IA:", err);
-      
-      //Tratamento amigável para estouro de cota (Erro 429)
       if (err.toString().includes("429") || err.toString().includes("quota")) {
-        return message.reply("Cansaço da porra, gastei todas as minhas respostas do Gemini por hoje. Tenta de novo mais tarde ou usa `!status` pra ver o servidor.");
+        return message.reply("Cansaço da porra, gastei todas as minhas respostas por hoje. Usa `!status` pra ver o servidor.");
       }
-      
       message.reply("Deu ruim na IA, tenta de novo.");
     }
   }
+});
 
 bot.login(token);
