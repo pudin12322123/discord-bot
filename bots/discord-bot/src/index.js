@@ -24,7 +24,10 @@ if (!token) {
 }
 
 const ai = new GoogleGenAI({ apiKey: aiKey });
-const SERVER_IP = "Geanncomgg1.aternos.me";
+
+// DADOS DO ATERNOS (Usa o IP Dinâmico para a biblioteca não ser bloqueada)
+const DISPLAY_IP = "Geanncomgg1.aternos.me";
+const DYN_IP = "escolar.aternos.host";
 const SERVER_PORT = 51384;
 
 const bot = new Client({
@@ -36,11 +39,12 @@ const bot = new Client({
 });
 
 // ==========================================
-// FUNÇÃO ROBUSTA DE STATUS DO MINECRAFT
+// FUNÇÃO DE STATUS COM IP DINÂMICO
 // ==========================================
 async function checkMinecraftStatus() {
+  // 1. Tenta ping usando o IP Dinâmico na porta específica
   try {
-    const result = await util.status(SERVER_IP, Number(SERVER_PORT), { timeout: 3000 });
+    const result = await util.status(DYN_IP, Number(SERVER_PORT), { timeout: 4000 });
     return {
       online: true,
       players: result.players.online,
@@ -48,8 +52,9 @@ async function checkMinecraftStatus() {
       version: result.version.name,
     };
   } catch (error) {
+    // 2. Fallback para Bedrock/Geyser no IP Dinâmico
     try {
-      const bedrockResult = await util.statusBedrock(SERVER_IP, { port: Number(SERVER_PORT), timeout: 3000 });
+      const bedrockResult = await util.statusBedrock(DYN_IP, { port: Number(SERVER_PORT), timeout: 4000 });
       return {
         online: true,
         players: bedrockResult.players.online,
@@ -57,7 +62,18 @@ async function checkMinecraftStatus() {
         version: bedrockResult.version.name,
       };
     } catch (err) {
-      return { online: false, players: 0, maxPlayers: 0, version: "Desconhecida" };
+      // 3. Tentativa final com o IP normal
+      try {
+        const fallbackResult = await util.status(DISPLAY_IP, Number(SERVER_PORT), { timeout: 4000 });
+        return {
+          online: true,
+          players: fallbackResult.players.online,
+          maxPlayers: fallbackResult.players.max,
+          version: fallbackResult.version.name,
+        };
+      } catch (e3) {
+        return { online: false, players: 0, maxPlayers: 0, version: "Desconhecida" };
+      }
     }
   }
 }
@@ -98,14 +114,14 @@ bot.on(Events.MessageCreate, async (message) => {
       if (result.online) {
         return message.reply(
           `🟢 **UMBRYON MINECRAFT ONLINE!**\n` +
-            `🌐 IP: \`${SERVER_IP}\` | Porta: \`${SERVER_PORT}\`\n` +
+            `🌐 IP: \`${DISPLAY_IP}\` | Porta: \`${SERVER_PORT}\`\n` +
             `👥 Jogadores: ${result.players.online}/${result.players.max}\n` +
             `📌 Versão: ${result.version}`,
         );
       } else {
         return message.reply(
           `🔴 **Servidor Offline ou Iniciando.**\n` +
-            `O Aternos está desligado no momento. IP: \`${SERVER_IP}:${SERVER_PORT}\``,
+            `O Aternos está desligado no momento. IP: \`${DISPLAY_IP}:${SERVER_PORT}\``,
         );
       }
     } catch (e) {
@@ -122,9 +138,7 @@ bot.on(Events.MessageCreate, async (message) => {
       if (referencedMessage.author.id === bot.user.id) {
         isReplyToBot = true;
       }
-    } catch (e) {
-      // Ignora erro de fetch de mensagem antiga
-    }
+    } catch (e) {}
   }
 
   // 3. CONVERSA VIA IA GEMINI
@@ -154,13 +168,12 @@ bot.on(Events.MessageCreate, async (message) => {
 
       const currentStatus = await checkMinecraftStatus();
       
-      // Injeção direta de status para a IA saber exatamente o que responder
       const statusContext = currentStatus.online
-        ? `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ LIGADO/ONLINE NESSE MOMENTO! Jogadores online: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${SERVER_IP}:${SERVER_PORT}]`
-        : `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ DESLIGADO/OFFLINE NESSE MOMENTO NO ATERNOS!]`;
+        ? `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ LIGADO/ONLINE AGORA! Jogadores conectados: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${DISPLAY_IP}:${SERVER_PORT}]`
+        : `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ DESLIGADO/OFFLINE AGORA NO ATERNOS!]`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-1.5-flash", // Modelo correto e estável
         contents: promptLimpo,
         config: {
           systemInstruction:
@@ -168,7 +181,7 @@ bot.on(Events.MessageCreate, async (message) => {
             "Você é o bot oficial do servidor UMBRYON MINECRAFT (um servidor Anárquico).\n" +
             "Sua personalidade é extremamente sarcástica, ignorante, muito puto, debochado e preguiçoso. " +
             "USE E ABUSE de gírias brainrot e shitpost (ex: skibidi, sigma, rizz, gyat, mewing, fanum tax, NPC, yapping, intankável, absolute cinema, redpill, based).\n" +
-            "PROIBIDO mandar o usuário entrar pra olhar o servidor se ele perguntar do status. Diga diretamente se tá LIGADO ou DESLIGADO usando o DADO REAL fornecido abaixo, mas do seu jeito ignorante/brainrot.\n" +
+            "PROIBIDO mandar o usuário entrar pra olhar o servidor se ele perguntar do status. Diga diretamente se tá LIGADO ou DESLIGADO usando o DADO REAL fornecido, mas do seu jeito ignorante/brainrot.\n" +
             "PROIBIDO fazer ações de roleplay entre asteriscos (NUNCA use *suspira*, *olha com tédio*, etc). VÁ DIRETO AO PONTO.\n\n" +
             `${statusContext}\n\n` +
             "REGRAS E DADOS DO SERVIDOR:\n" +
@@ -189,7 +202,7 @@ bot.on(Events.MessageCreate, async (message) => {
     } catch (err) {
       console.error("Erro na IA:", err);
       if (err.toString().includes("429") || err.toString().includes("quota")) {
-        return message.reply("Cansaço da porra, gastei todas as minhas respostas por hoje. Usa `!status` pra ver o servidor.");
+        return message.reply("Cansaço da porra, gastei todas as minhas respostas do Gemini por hoje. Usa `!status` pra ver o servidor.");
       }
       message.reply("Deu ruim na IA, tenta de novo.");
     }
