@@ -117,7 +117,7 @@ bot.on(Events.MessageCreate, async (message) => {
     }
   }
 
-  // 2. CONVERSA VIA IA GEMINI
+// 2. CONVERSA VIA IA GEMINI
   const isAskedAboutServer =
     textoLower.includes("sv ta on") ||
     textoLower.includes("server ta on") ||
@@ -130,14 +130,13 @@ bot.on(Events.MessageCreate, async (message) => {
       await message.channel.sendTyping();
       const promptLimpo = texto.replace(`<@${bot.user.id}>`, "").trim() || "oi";
 
-      // Pega o status do servidor para dar de contexto pra IA
       const currentStatus = await checkMinecraftStatus();
       const statusContext = currentStatus.online
         ? `[DADOS DO MINECRAFT AGORA: SERVIDOR ONLINE! Jogadores: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${SERVER_IP}:${SERVER_PORT}]`
         : `[DADOS DO MINECRAFT AGORA: SERVIDOR OFFLINE NO ATERNOS.]`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash", // Nome correto e estável do modelo
+        model: "gemini-1.5-flash", // MODELO ESTÁVEL
         contents: promptLimpo,
         config: {
           systemInstruction:
@@ -162,13 +161,18 @@ bot.on(Events.MessageCreate, async (message) => {
       if (response && response.text) {
         message.reply(response.text);
       } else {
-        message.reply("Cala a boca aí, deu erro aqui.");
+        message.reply("Cala a boca aí, deu erro no meu cérebro.");
       }
     } catch (err) {
       console.error("Erro na IA:", err);
+      
+      //Tratamento amigável para estouro de cota (Erro 429)
+      if (err.toString().includes("429") || err.toString().includes("quota")) {
+        return message.reply("Cansaço da porra, gastei todas as minhas respostas do Gemini por hoje. Tenta de novo mais tarde ou usa `!status` pra ver o servidor.");
+      }
+      
       message.reply("Deu ruim na IA, tenta de novo.");
     }
   }
-});
 
 bot.login(token);
