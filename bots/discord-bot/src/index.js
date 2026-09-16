@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import util from "minecraft-server-util";
 import http from "http";
 
-// Servidor Web Keep-Alive na porta 3000
+// Servidor Web Keep-Alive na porta 3000 escutando em 0.0.0.0
 const PORT = process.env.PORT || 3000;
 http
   .createServer((req, res) => {
@@ -19,15 +19,12 @@ const token = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
 const aiKey = process.env.GEMINI_API_KEY;
 
 if (!token) {
-  console.error("Token do Discord não encontrado.");
+  console.error("Token do Discord não encontrado nos Secrets.");
   process.exit(1);
 }
 
 const ai = new GoogleGenAI({ apiKey: aiKey });
-
-// DADOS DO ATERNOS (Usa o IP Dinâmico para a biblioteca não ser bloqueada)
-const DISPLAY_IP = "Geanncomgg1.aternos.me";
-const DYN_IP = "escolar.aternos.host";
+const SERVER_IP = "Geanncomgg1.aternos.me";
 const SERVER_PORT = 51384;
 
 const bot = new Client({
@@ -39,12 +36,11 @@ const bot = new Client({
 });
 
 // ==========================================
-// FUNÇÃO DE STATUS COM IP DINÂMICO
+// FUNÇÃO ROBUSTA DE STATUS DO MINECRAFT
 // ==========================================
 async function checkMinecraftStatus() {
-  // 1. Tenta ping usando o IP Dinâmico na porta específica
   try {
-    const result = await util.status(DYN_IP, Number(SERVER_PORT), { timeout: 4000 });
+    const result = await util.status(SERVER_IP, SERVER_PORT, { timeout: 4000 });
     return {
       online: true,
       players: result.players.online,
@@ -52,9 +48,8 @@ async function checkMinecraftStatus() {
       version: result.version.name,
     };
   } catch (error) {
-    // 2. Fallback para Bedrock/Geyser no IP Dinâmico
     try {
-      const bedrockResult = await util.statusBedrock(DYN_IP, { port: Number(SERVER_PORT), timeout: 4000 });
+      const bedrockResult = await util.statusBedrock(SERVER_IP, { port: SERVER_PORT, timeout: 4000 });
       return {
         online: true,
         players: bedrockResult.players.online,
@@ -62,18 +57,7 @@ async function checkMinecraftStatus() {
         version: bedrockResult.version.name,
       };
     } catch (err) {
-      // 3. Tentativa final com o IP normal
-      try {
-        const fallbackResult = await util.status(DISPLAY_IP, Number(SERVER_PORT), { timeout: 4000 });
-        return {
-          online: true,
-          players: fallbackResult.players.online,
-          maxPlayers: fallbackResult.players.max,
-          version: fallbackResult.version.name,
-        };
-      } catch (e3) {
-        return { online: false, players: 0, maxPlayers: 0, version: "Desconhecida" };
-      }
+      return { online: false, players: 0, maxPlayers: 0, version: "Desconhecida" };
     }
   }
 }
@@ -84,6 +68,7 @@ async function checkMinecraftStatus() {
 bot.once(Events.ClientReady, (client) => {
   console.log(`🤖 Bot online com IA Gemini: ${client.user.tag}`);
 
+  // Atualiza a atividade do bot no Discord a cada 2 minutos
   setInterval(async () => {
     const statusData = await checkMinecraftStatus();
     if (statusData.online) {
@@ -105,91 +90,64 @@ bot.on(Events.MessageCreate, async (message) => {
   const texto = message.content.trim();
   const textoLower = texto.toLowerCase();
 
-  // 1. COMANDO DIRETO !status
+  // 1. Comando direto !status
   if (textoLower === "!status") {
-    try {
-      await message.channel.sendTyping();
-      const result = await checkMinecraftStatus();
+    await message.channel.sendTyping();
+    const result = await checkMinecraftStatus();
 
-      if (result.online) {
-        return message.reply(
-          `🟢 **UMBRYON MINECRAFT ONLINE!**\n` +
-            `🌐 IP: \`${DISPLAY_IP}\` | Porta: \`${SERVER_PORT}\`\n` +
-            `👥 Jogadores: ${result.players.online}/${result.players.max}\n` +
-            `📌 Versão: ${result.version}`,
-        );
-      } else {
-        return message.reply(
-          `🔴 **Servidor Offline ou Iniciando.**\n` +
-            `O Aternos está desligado no momento. IP: \`${DISPLAY_IP}:${SERVER_PORT}\``,
-        );
-      }
-    } catch (e) {
-      console.error("Erro no comando status:", e);
-      return message.reply("Deu erro ao consultar o servidor de Minecraft.");
+    if (result.online) {
+      return message.reply(
+        `🟢 **UMBRYON MINECRAFT ONLINE!**\n` +
+          `🌐 IP: \`${SERVER_IP}\` | Porta: \`${SERVER_PORT}\`\n` +
+          `👥 Jogadores: ${result.players.online}/${result.players.max}\n` +
+          `📌 Versão: ${result.version}`,
+      );
+    } else {
+      return message.reply(
+        `🔴 **Servidor Offline.**\n` +
+          `Ninguém ligou o Aternos ainda. Endereço: \`${SERVER_IP}:${SERVER_PORT}\``,
+      );
     }
   }
 
-  // 2. VERIFICA SE A MENSAGEM É UMA RESPOSTA AO BOT
-  let isReplyToBot = false;
-  if (message.reference && message.reference.messageId) {
-    try {
-      const referencedMessage = await message.channel.messages.fetch(message.reference.messageId);
-      if (referencedMessage.author.id === bot.user.id) {
-        isReplyToBot = true;
-      }
-    } catch (e) {}
-  }
-
-  // 3. CONVERSA VIA IA GEMINI
+  // 2. Conversa via IA
   const isAskedAboutServer =
     textoLower.includes("sv ta on") ||
     textoLower.includes("server ta on") ||
     textoLower.includes("servidor esta on") ||
     textoLower.includes("servidor ta ligado") ||
-    textoLower.includes("ta aberto") ||
-    textoLower.includes("ta ligado") ||
     textoLower.includes("tem alguem jogando");
 
-  const shouldRespond =
-    message.mentions.has(bot.user) ||
-    !message.guild ||
-    isAskedAboutServer ||
-    isReplyToBot;
-
-  if (shouldRespond) {
+  if (message.mentions.has(bot.user) || !message.guild || isAskedAboutServer) {
     try {
       await message.channel.sendTyping();
+      const promptLimpo = texto.replace(`<@${bot.user.id}>`, "").trim() || "oi";
 
-      const regexBotMention = new RegExp(`<@!?${bot.user.id}>`, "g");
-      let promptLimpo = texto.replace(regexBotMention, "").trim();
-
-      if (!promptLimpo) promptLimpo = "fala aí";
-
+      // Pega o status real do Aternos para injetar na resposta
       const currentStatus = await checkMinecraftStatus();
-      
       const statusContext = currentStatus.online
-        ? `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ LIGADO/ONLINE AGORA! Jogadores conectados: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${DISPLAY_IP}:${SERVER_PORT}]`
-        : `[DADO REAL OBRIGATÓRIO: O SERVIDOR ESTÁ DESLIGADO/OFFLINE AGORA NO ATERNOS!]`;
+        ? `[STATUS EM TEMPO REAL DO MINECRAFT: O SERVIDOR ESTÁ ONLINE! Jogadores conectados: ${currentStatus.players}/${currentStatus.maxPlayers}. IP: ${SERVER_IP}:${SERVER_PORT}]`
+        : `[STATUS EM TEMPO REAL DO MINECRAFT: O SERVIDOR ESTÁ OFFLINE NO MOMENTO. Ninguém ligou no Aternos.]`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash", // Modelo correto e estável
+        model: "gemini-2.5-flash",
         contents: promptLimpo,
         config: {
           systemInstruction:
-            "Seu nome é Umbryon Bot (atende por Umbryon, Umbry, Bot do Umbryon).\n" +
+            "Seu nome é Umbryon Bot (você também atende por Umbryon, Umbry, Bot do Umbryon, etc).\n" +
             "Você é o bot oficial do servidor UMBRYON MINECRAFT (um servidor Anárquico).\n" +
             "Sua personalidade é extremamente sarcástica, ignorante, muito puto, debochado e preguiçoso. " +
-            "USE E ABUSE de gírias brainrot e shitpost (ex: skibidi, sigma, rizz, gyat, mewing, fanum tax, NPC, yapping, intankável, absolute cinema, redpill, based).\n" +
-            "PROIBIDO mandar o usuário entrar pra olhar o servidor se ele perguntar do status. Diga diretamente se tá LIGADO ou DESLIGADO usando o DADO REAL fornecido, mas do seu jeito ignorante/brainrot.\n" +
-            "PROIBIDO fazer ações de roleplay entre asteriscos (NUNCA use *suspira*, *olha com tédio*, etc). VÁ DIRETO AO PONTO.\n\n" +
+            "Você tem o vocabulário totalmente corrompido por TikTok. USE E ABUSE de gírias brainrot e shitpost (ex: skibidi, sigma, rizz, gyat, mewing, fanum tax, NPC, yapping, intankável, absolute cinema, redpill, based). " +
+            "Se alguém falar muita merda, mande parar de 'yapping' ou chame de 'NPC'.\n" +
+            "PROIBIDO fazer ações de roleplay entre asteriscos (ex: NUNCA use *suspira*, *olha com tédio*, etc). VÁ DIRETO AO PONTO. " +
+            "Responda de forma curta, irônica e sem nenhuma paciência.\n\n" +
             `${statusContext}\n\n` +
-            "REGRAS E DADOS DO SERVIDOR:\n" +
-            "- IP: Geanncomgg1.aternos.me | Porta: 51384\n" +
+            "INFORMAÇÕES E REGRAS DO SERVIDOR QUE VOCÊ CONHECE E DEVE RESPONDER SE PERGUNTAREM:\n" +
+            "- IP do Minecraft: Geanncomgg1.aternos.me | Porta: 51384\n" +
             "- Estilo: Servidor Anárquico.\n" +
-            "- Griefing e Roubo: TOTALMENTE PERMITIDOS. Sem proteção de terreno. Perdeu a base? Skill issue, chora mais.\n" +
-            "- Hacks e Cheats: TOTALMENTE PERMITIDOS (X-Ray, KillAura, Fly, hack client). É terra sem lei.\n" +
-            "- Máquinas de Lag: ÚNICA COISA PROIBIDA. Não crie lag machines para travar o Aternos.\n" +
+            "- Griefing e Roubo: TOTALMENTE PERMITIDOS. Não há proteção de terreno. Perdeu a base? Skill issue, chora mais.\n" +
+            "- Hacks e Cheats: TOTALMENTE PERMITIDOS. X-Ray, KillAura, Fly, hack client, foda-se. O servidor é terra sem lei, se vira pra sobreviver.\n" +
+            "- Máquinas de Lag: A ÚNICA COISA PROIBIDA. Não crie lag machines para travar a host de batata do Aternos. Farms que crasharem o servidor serão deletadas.\n" +
             "- Regras do Discord: Sem flood de comandos. Usem os canais certos (#fotos-mine, #aternos, #chat).",
         },
       });
@@ -197,14 +155,11 @@ bot.on(Events.MessageCreate, async (message) => {
       if (response && response.text) {
         message.reply(response.text);
       } else {
-        message.reply("Cala a boca aí, deu erro no meu cérebro.");
+        message.reply("Que porra tu falou? Entendi nada.");
       }
     } catch (err) {
       console.error("Erro na IA:", err);
-      if (err.toString().includes("429") || err.toString().includes("quota")) {
-        return message.reply("Cansaço da porra, gastei todas as minhas respostas do Gemini por hoje. Usa `!status` pra ver o servidor.");
-      }
-      message.reply("Deu ruim na IA, tenta de novo.");
+      message.reply("Deu erro nessa porcaria de IA aqui.");
     }
   }
 });
